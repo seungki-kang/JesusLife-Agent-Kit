@@ -1,71 +1,14 @@
 ---
 name: jesuslife-platform-development
-description: JesusLife 플랫폼 전체(너랑나랑, 생명일기, ChurchOS, JLPrayer, JLBible, JesusLife Academy, CHGO)를 일관된 경계와 보호 규칙으로 설계·개발·검증하는 통합 스킬. 해당 제품의 Flutter, FastAPI, 데이터베이스, 동기화, 온톨로지, 개인정보, 테스트 또는 배포 작업에서 자동 사용한다. 단순 개념 설명과 코드 학습 요청에는 사용하지 않는다.
+description: JesusLife 제품 작업의 공통 보호 규칙과 자동 라우터. 기존 호출 이름을 유지하며 기획·설계는 design, 코드·DB·API·테스트·빌드는 implementation으로 분류한다. 단순 개념 설명과 코드 학습은 제외한다.
 ---
 
-# JesusLife 플랫폼 개발
+# JesusLife 공통 라우터
 
-## 제품 경계
+작업 전에 [공통 보호·라우팅 절차](references/common-rules.md)를 읽고 적용할 스킬과 순서를 알린다. 불명확하거나 위험한 요청은 변경 없이 질문한다. 중요 경계는 AUTHOR_REVIEW_REQUIRED로 분류하고 필요한 승인 전 변경하지 않는다.
 
-- ChurchOS: 교회·조직·역할·화이트라벨과 통합 사용자 경험
-- JLBible: 성경 읽기·통독·묵상
-- JLPrayer: 개인·공동체 기도와 중보
-- 너랑나랑: 십자가 문답 세션과 완료 기록
-- 생명일기: 개인 영성 기록과 음성 전사
-- JesusLife Academy: 교재·강의·과정·진도·수료
-- CHGO: 개념·관계·근거·추천·추론 엔진
-- JesusLife One: 별도 앱으로 만들지 않고 ChurchOS에서 통합 제공
+- 설계: [design](../jesuslife-platform-design/SKILL.md).
+- 구현: [implementation](../jesuslife-platform-implementation/SKILL.md).
+- “설계하고 구현”: design → 중요 경계의 필요한 승인 → implementation.
 
-각 데이터에는 원본 소유 제품을 하나만 둔다. 다른 제품은 API 또는 이벤트로 참조한다.
-
-## 작업 모드 선택
-
-요청을 다음 모드 중 하나 이상으로 자동 분류하고 순서를 알린다.
-
-1. 설계: 제품 경계, 사용자 흐름, 데이터 소유권, API 계약
-2. Flutter: 화면, 상태, 로컬 저장, 오프라인, 접근성
-3. API: FastAPI, 인증, 권한, 동기화, 계약
-4. CHGO: 후보, 근거, 승인, Canonical ID, 추론 규칙
-5. 품질: 회귀 테스트, 개인정보, migration, 릴리스 판정
-
-## 작업 전
-
-1. 대상 저장소의 `AGENTS.md`와 프로젝트 문서를 읽는다.
-2. 현재 브랜치와 `git status --short`를 확인한다.
-3. 미커밋 변경은 사용자 작업으로 간주하고 보존한다.
-4. 사용자 기록, DB, 인증, 개인정보, 신학 정본 영향을 분류한다.
-5. 화면 → 상태/모델 → 저장소 계약 → 구현 → DB/API → 테스트 순서로 추적한다.
-
-## 구현 원칙
-
-- 관련 없는 파일을 수정하지 않는다.
-- 큰 구조 변경과 기능 변경을 한 번에 섞지 않는다.
-- 저장 성공 확인 전에 완료를 표시하지 않는다.
-- 삭제보다 복구 보관함과 소프트 삭제를 우선한다.
-- 로그에 이름, 기도문, 은혜 기록, 일기, 서명 내용을 출력하지 않는다.
-- Flutter UI가 SQLite 또는 서버 구현에 직접 의존하지 않게 한다.
-- API 서버가 인증과 권한을 최종 검사하게 한다.
-- PostgreSQL은 업무 기록 원본, 객체 저장소는 파일, 벡터 DB는 파생 검색 색인으로 사용한다.
-- CHGO 후보 지식과 승인된 정본을 분리한다.
-
-## 승인 경계
-
-다음은 자동 실행하지 않는다.
-
-- 교재·기도문·신학 명제 변경
-- Canonical ID 발급·병합·폐기
-- DB migration과 사용자 기록 영구 삭제
-- 실제 개인정보 수집과 외부 API 연결
-- commit, push, merge, 배포, 서비스 활성화
-
-신학적 판단은 `AUTHOR_REVIEW_REQUIRED`로 보고한다. AI는 저자, 신학 검토자, 독립된 사람의 서명이나 동의를 대신하지 않는다.
-
-## 검증과 보고
-
-- 가장 가까운 테스트부터 전체 테스트와 빌드로 넓힌다.
-- DB 변경은 새 설치와 기존 버전 업그레이드를 모두 검증한다.
-- 결과는 `PASS`, `FAIL`, `NOT_RUN`, `BLOCKED`, `AUTHOR_REVIEW_REQUIRED`로 표시한다.
-- 실행하지 않은 검증을 통과했다고 말하지 않는다.
-- 결과, 변경 파일, 실행한 검증, 미검증, 남은 위험을 먼저 보고한다.
-- 코드 학습 설명은 사용자가 요청할 때만 제공한다.
-
+기존 이름과 Flutter·API·CHGO·품질 모드 호출을 유지한다. 하위 스킬이 없으면 공통 절차에 연결된 references를 사용한다. 외부 스킬은 자체 보호 규칙 아래에서 최소한으로 보조 사용하며 자동 설치하지 않는다. 세부 절차·자료 선택·검증 보고는 references를 따른다.

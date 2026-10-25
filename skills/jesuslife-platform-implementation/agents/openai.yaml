@@ -1,0 +1,6 @@
+interface:
+  display_name: "JesusLife 개발"
+  short_description: "JesusLife Flutter·API·DB 최소 변경과 회귀 검증"
+  default_prompt: "Use $jesuslife-platform-implementation to announce the workflow, check the path, branch and Git changes, implement this JesusLife task with minimal recoverable changes under the common protection rules, and report actual verification results."
+policy:
+  allow_implicit_invocation: true
