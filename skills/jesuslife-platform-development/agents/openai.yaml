@@ -1,0 +1,5 @@
+interface:
+  display_name: "JesusLife Platform Development"
+  short_description: "JesusLife 전체 제품을 안전하게 설계·개발·검증"
+  default_prompt: "Use $jesuslife-platform-development to handle this JesusLife platform task with the correct product boundary, data protection, and verification workflow."
+
