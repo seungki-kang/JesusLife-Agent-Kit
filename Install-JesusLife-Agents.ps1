@@ -188,7 +188,8 @@ function Install-PlatformSkillSet {
     # Report success only after all three match the same package.
     foreach ($member in $members) {
       $status=if ($null -eq $member.Before) { 'INSTALLED' } else { 'UPDATED' }
-      Add-Result $member.Id $status "3종 세트 적용 완료; 백업: $($member.Backup)"
+      $message=if ($null -eq $member.Before) { '3종 세트 적용 완료' } else { "3종 세트 적용 완료; 백업: $($member.Backup)" }
+      Add-Result $member.Id $status $message
     }
   }
   catch {
@@ -451,7 +452,7 @@ if ($hasReview) {
   Write-Host "설치 작업이 끝났지만 검토가 필요한 항목이 남아 있습니다."
 }
 else {
-  Write-Host "설치가 끝났습니다. Codex에서 /skills를 실행하여 3종 스킬 세트을 확인하세요."
+  Write-Host "설치가 끝났습니다. Codex에서 /skills를 실행하여 3종 스킬 세트를 확인하세요."
 }
 }
 finally {

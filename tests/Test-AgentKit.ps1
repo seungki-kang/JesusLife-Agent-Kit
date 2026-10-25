@@ -100,6 +100,14 @@ Assert (@(Get-ChildItem (Join-Path $local 'JesusLife\Temp') -Force).Count -eq 0)
 $profile=$normalProfile; $local=$normalLocal; $project=$normalProject
 Run-Installer
 Assert ($lastCode -eq 0 -and ([regex]::Matches($lastOutput,'INSTALLED')).Count -eq 4) 'Initial three skills and AGENTS'
+# Normalize table wrapping so complete messages and paths can be checked in redirected output.
+$compactOutput=$lastOutput -replace '\s',''
+foreach ($name in $names) {
+  Assert ($compactOutput.Contains(($name + ' INSTALLED 3종 세트 적용 완료' -replace '\s',''))) "New skill success message: $name"
+}
+Assert ($lastOutput -notmatch '백업:') 'New installation omits backup label'
+Assert ($lastOutput.Contains('3종 스킬 세트를 확인하세요.')) 'Correct completion wording'
+Assert (-not $lastOutput.Contains('3종 스킬 세트을 확인하세요.')) 'Old completion typo absent'
 foreach ($name in $names) { Assert (Test-Path (Join-Path $profile ".agents\skills\$name\SKILL.md")) "Installed $name" }
 Run-Installer
 Assert ($lastCode -eq 0 -and ([regex]::Matches($lastOutput,'UNCHANGED')).Count -eq 4) 'Idempotent UNCHANGED'
@@ -111,6 +119,13 @@ foreach ($name in $names) { Assert ([IO.File]::ReadAllText((Join-Path $profile "
 Run-Installer replace
 Assert ($lastCode -eq 0 -and ([regex]::Matches($lastOutput,'UPDATED')).Count -eq 4) 'Replace agents and skills'
 Assert (@(Get-ChildItem (Join-Path $local 'JesusLife\AgentBackups\skills') -Directory).Count -eq 3) 'Three skill backups'
+$compactOutput=$lastOutput -replace '\s',''
+foreach ($name in $names) {
+  $backups=@(Get-ChildItem (Join-Path $local 'JesusLife\AgentBackups\skills') -Directory | Where-Object { $_.Name -like "$name-*" })
+  Assert ($backups.Count -eq 1) "Actual replacement backup: $name"
+  $expected="$name UPDATED 3종 세트 적용 완료; 백업: $($backups[0].FullName)" -replace '\s',''
+  Assert ($compactOutput.Contains($expected)) "Replacement message includes actual backup path: $name"
+}
 Assert (@(Get-ChildItem (Join-Path $local 'JesusLife\AgentBackups') -Recurse -Filter AGENTS-*.md).Count -eq 1) 'AGENTS backup'
 Assert (@(Get-ChildItem (Join-Path $local 'JesusLife\Temp') -Force).Count -eq 0) 'Staging cleanup'
 foreach ($name in $names) {
