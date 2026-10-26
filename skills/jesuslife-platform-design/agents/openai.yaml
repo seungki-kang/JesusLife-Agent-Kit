@@ -1,0 +1,6 @@
+interface:
+  display_name: "JesusLife 설계"
+  short_description: "JesusLife 제품 경계·흐름·계약 초안과 설계 대안 비교"
+  default_prompt: "Use $jesuslife-platform-design to announce the workflow and draft this JesusLife design under the common protection rules, without changing app code or databases, and flag important boundaries for approval."
+policy:
+  allow_implicit_invocation: true

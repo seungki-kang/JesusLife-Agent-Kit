@@ -67,12 +67,12 @@ function Get-DirectoryFingerprint {
   }
 
   $root = (Resolve-Path -LiteralPath $Path).Path.TrimEnd('\')
-  $directoryEntries = foreach ($directory in Get-ChildItem -LiteralPath $root -Directory -Recurse | Sort-Object FullName) {
+  $directoryEntries = foreach ($directory in Get-ChildItem -LiteralPath $root -Directory -Recurse -Force | Sort-Object FullName) {
     $relativePath = $directory.FullName.Substring($root.Length).TrimStart('\')
     "D|$relativePath"
   }
 
-  $fileEntries = foreach ($file in Get-ChildItem -LiteralPath $root -File -Recurse | Sort-Object FullName) {
+  $fileEntries = foreach ($file in Get-ChildItem -LiteralPath $root -File -Recurse -Force | Sort-Object FullName) {
     $relativePath = $file.FullName.Substring($root.Length).TrimStart('\')
     $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
     "F|$relativePath|$hash"
@@ -91,143 +91,167 @@ function Get-DirectoryFingerprint {
   }
 }
 
-function Install-PlatformSkill {
-  $temporarySkill = $null
-
-  if (-not (Test-Path -LiteralPath $skillSource -PathType Container)) {
-    Add-Result -Name "통합 스킬" -Status "FAIL" -Message "번들 스킬 폴더 없음"
-    return
+# Guard every recursive removal against its intended root.
+function Remove-SetPath {
+  param([string]$Path, [string]$Root)
+  $full=[IO.Path]::GetFullPath($Path)
+  $prefix=[IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+  if (-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
+    throw "정리 대상이 허용 루트 밖입니다: $full"
   }
+  if (Test-Path -LiteralPath $full) { Remove-Item -LiteralPath $full -Recurse -Force }
+}
 
-  $sourceSkillFile = Join-Path $skillSource "SKILL.md"
-  if (-not (Test-Path -LiteralPath $sourceSkillFile -PathType Leaf)) {
-    Add-Result -Name "통합 스킬" -Status "FAIL" -Message "번들 스킬의 SKILL.md 없음: $sourceSkillFile"
-    return
-  }
-
+function Install-PlatformSkillSet {
+  $members=[System.Collections.Generic.List[object]]::new()
+  $touched=[System.Collections.Generic.List[object]]::new()
+  $stageRoot=$null
+  $currentName='JesusLife 3종 스킬 세트'
+  $operationId="{0}-{1}" -f $timestamp,([guid]::NewGuid().ToString('N'))
   try {
-    New-Item -ItemType Directory -Force -Path $skillParent | Out-Null
-    $sourceFingerprint = Get-DirectoryFingerprint -Path $skillSource
-    $destinationExists = Test-Path -LiteralPath $skillDestination -PathType Container
-
-    if ($destinationExists) {
-      $destinationFingerprint = Get-DirectoryFingerprint -Path $skillDestination
-      if ($sourceFingerprint -eq $destinationFingerprint) {
-        Add-Result -Name "통합 스킬" -Status "UNCHANGED" -Message "이미 최신 상태"
-        return
-      }
-      if (-not $ReplaceExistingSkill) {
-        Add-Result -Name "통합 스킬" -Status "REVIEW" -Message "설치본과 패키지가 다름. 업데이트하려면 -ReplaceExistingSkill 사용"
-        return
-      }
-    }
-    elseif (Test-Path -LiteralPath $skillDestination) {
-      throw "공식 스킬 경로에 폴더가 아닌 항목이 있습니다: $skillDestination"
-    }
-
-    $operationId = "{0}-{1}" -f $timestamp, ([guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Force -Path $temporaryRoot | Out-Null
-    $temporarySkill = Join-Path $temporaryRoot "jesuslife-platform-development-$operationId"
-    Copy-Item -LiteralPath $skillSource -Destination $temporarySkill -Recurse
-    if ($sourceFingerprint -ne (Get-DirectoryFingerprint -Path $temporarySkill)) {
-      throw "임시 스킬 복사본 검증에 실패했습니다. 기존 설치는 변경하지 않았습니다."
-    }
-
-    if (-not $destinationExists) {
-      try {
-        Move-Item -LiteralPath $temporarySkill -Destination $skillDestination
-        $temporarySkill = $null
-        if ($sourceFingerprint -ne (Get-DirectoryFingerprint -Path $skillDestination)) {
-          throw "설치된 스킬 fingerprint가 원본과 다릅니다."
+    # Complete preflight before any skill is changed.
+    foreach ($definition in $platformSkills) {
+      $currentName=$definition.Id
+      $source=Join-Path $packageRoot "skills\$currentName"
+      foreach ($required in @('SKILL.md','agents\openai.yaml')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $source $required) -PathType Leaf)) {
+          throw "번들 파일 없음: $source\$required"
         }
       }
-      catch {
-        $installError = $_.Exception.Message
-        if (Test-Path -LiteralPath $skillDestination) {
-          try {
-            Remove-Item -LiteralPath $skillDestination -Recurse -Force
-          }
-          catch {
-            throw "최초 설치 실패: $installError; 불완전한 폴더도 정리하지 못했습니다. 직접 확인: $skillDestination; 정리 오류: $($_.Exception.Message)"
-          }
-        }
-        throw "최초 설치 실패: $installError; 불완전한 설치 폴더는 정리했습니다."
+      if ($currentName -eq 'jesuslife-platform-development' -and
+          -not (Test-Path -LiteralPath (Join-Path $source 'references\common-rules.md') -PathType Leaf)) {
+        throw "공통 보호 규칙 없음: $source"
       }
-      Add-Result -Name "통합 스킬" -Status "INSTALLED" -Message $skillDestination
+      $destination=Join-Path $skillParent $currentName
+      if ((Test-Path -LiteralPath $destination) -and
+          -not (Test-Path -LiteralPath $destination -PathType Container)) {
+        throw "공식 스킬 경로가 폴더가 아닙니다: $destination"
+      }
+      $before=Get-DirectoryFingerprint -Path $destination
+      $expected=Get-DirectoryFingerprint -Path $source
+      $members.Add([pscustomobject]@{
+        Id=$currentName; Source=$source; Destination=$destination
+        Before=$before; Expected=$expected; Backup=$null; Stage=$null
+      })
+    }
+    if (@($members | Where-Object { $_.Before -ne $_.Expected }).Count -eq 0) {
+      foreach ($member in $members) { Add-Result $member.Id 'UNCHANGED' '3종 모두 패키지와 동일' }
+      return
+    }
+    if (-not $ReplaceExistingSkill -and @($members | Where-Object { $null -ne $_.Before }).Count -gt 0) {
+      foreach ($member in $members) {
+        Add-Result $member.Id 'REVIEW' '3종 세트 전체 보존. 혼합 설치 방지를 위해 -ReplaceExistingSkill 필요'
+      }
       return
     }
 
-    $skillBackupRoot = Join-Path $backupRoot "skills"
-    New-Item -ItemType Directory -Force -Path $skillBackupRoot | Out-Null
-    $skillBackup = Join-Path $skillBackupRoot "jesuslife-platform-development-$operationId"
-    Move-Item -LiteralPath $skillDestination -Destination $skillBackup
-
-    try {
-      Move-Item -LiteralPath $temporarySkill -Destination $skillDestination
-      $temporarySkill = $null
-      if ($sourceFingerprint -ne (Get-DirectoryFingerprint -Path $skillDestination)) {
-        throw "설치된 스킬 fingerprint가 원본과 다릅니다."
+    New-Item -ItemType Directory -Force -Path $skillParent,$temporaryRoot | Out-Null
+    $stageRoot=Join-Path $temporaryRoot "skill-set-$operationId"
+    New-Item -ItemType Directory -Path $stageRoot | Out-Null
+    # Stage every member and verify before backing up or replacing anything.
+    foreach ($member in $members) {
+      $currentName=$member.Id
+      $member.Stage=Join-Path $stageRoot "$($member.Id)-$operationId"
+      Copy-Item -LiteralPath $member.Source -Destination $member.Stage -Recurse -Force
+      if ((Get-DirectoryFingerprint $member.Stage) -ne $member.Expected) {
+        throw "staging fingerprint 불일치: $currentName"
       }
     }
-    catch {
-      $replacementError = $_.Exception.Message
-
-      if (-not (Test-Path -LiteralPath $skillBackup -PathType Container)) {
-        throw "새 스킬 설치 실패: $replacementError; 백업 폴더를 찾지 못해 자동 복원하지 못했습니다: $skillBackup"
-      }
-
-      try {
-        if (Test-Path -LiteralPath $skillDestination) {
-          Remove-Item -LiteralPath $skillDestination -Recurse -Force
+    $skillBackupRoot=Join-Path $backupRoot 'skills'
+    foreach ($member in $members) {
+      $currentName=$member.Id
+      if ($null -ne $member.Before) {
+        New-Item -ItemType Directory -Force -Path $skillBackupRoot | Out-Null
+        $member.Backup=Join-Path $skillBackupRoot "$($member.Id)-$operationId"
+        Copy-Item -LiteralPath $member.Destination -Destination $member.Backup -Recurse -Force
+        if ((Get-DirectoryFingerprint $member.Backup) -ne $member.Before) {
+          throw "기존 스킬 백업 fingerprint 불일치: $currentName; 백업 후보: $($member.Backup)"
         }
-        Move-Item -LiteralPath $skillBackup -Destination $skillDestination
       }
-      catch {
-        throw "새 스킬 설치 실패: $replacementError; 원본 복원도 실패했습니다. 수동 복구용 백업: $skillBackup; 복원 오류: $($_.Exception.Message)"
-      }
-
-      throw "새 스킬 설치 실패: $replacementError; 기존 스킬은 복원되었습니다."
     }
-
-    Add-Result -Name "통합 스킬" -Status "UPDATED" -Message "백업: $skillBackup"
+    # Refuse to overwrite edits made after preflight.
+    foreach ($member in $members) {
+      $currentName=$member.Id
+      if ((Get-DirectoryFingerprint $member.Destination) -ne $member.Before) {
+        throw "사전 점검 후 설치본 변경 감지: $currentName"
+      }
+    }
+    foreach ($member in $members) {
+      $currentName=$member.Id
+      $touched.Add($member)
+      Remove-SetPath $member.Destination $skillParent
+      Move-Item -LiteralPath $member.Stage -Destination $member.Destination
+      if ((Get-DirectoryFingerprint $member.Destination) -ne $member.Expected) {
+        throw "설치 fingerprint 불일치: $currentName"
+      }
+    }
+    # Report success only after all three match the same package.
+    foreach ($member in $members) {
+      $status=if ($null -eq $member.Before) { 'INSTALLED' } else { 'UPDATED' }
+      $message=if ($null -eq $member.Before) { '3종 세트 적용 완료' } else { "3종 세트 적용 완료; 백업: $($member.Backup)" }
+      Add-Result $member.Id $status $message
+    }
   }
   catch {
-    Add-Result -Name "통합 스킬" -Status "FAIL" -Message $_.Exception.Message
-  }
-  finally {
-    if (-not [string]::IsNullOrWhiteSpace($temporarySkill) -and
-        (Test-Path -LiteralPath $temporarySkill)) {
+    $failure=$_.Exception.Message
+    Add-Result $currentName 'FAIL' "세트 적용 실패: $failure"
+    for ($index=$touched.Count-1; $index -ge 0; $index--) {
+      $member=$touched[$index]
       try {
-        Remove-Item -LiteralPath $temporarySkill -Recurse -Force
+        # Never remove the new copy unless the old backup is still valid.
+        if ($null -ne $member.Before -and
+            (Get-DirectoryFingerprint $member.Backup) -ne $member.Before) {
+          throw '백업 없음 또는 fingerprint 불일치; 대상 보존, 수동 복구 필요'
+        }
+        Remove-SetPath $member.Destination $skillParent
+        if ($null -ne $member.Before) {
+          Copy-Item -LiteralPath $member.Backup -Destination $member.Destination -Recurse -Force
+        }
+        if ((Get-DirectoryFingerprint $member.Destination) -ne $member.Before) {
+          throw '복원 fingerprint 불일치'
+        }
+        Add-Result "$($member.Id) 복원" 'BLOCKED' "복원 성공: 실행 전 상태; 백업 보존: $($member.Backup)"
       }
       catch {
-        Add-Result -Name "임시 폴더 정리" -Status "FAIL" -Message "직접 삭제 필요: $temporarySkill; $($_.Exception.Message)"
+        Add-Result "$($member.Id) 복원" 'FAIL' "복원 실패; 수동 복구용 백업: $($member.Backup); $($_.Exception.Message)"
       }
+    }
+    foreach ($definition in $platformSkills) {
+      if ($definition.Id -ne $currentName) {
+        Add-Result $definition.Id 'BLOCKED' "세트 적용 실패로 새 버전 적용 취소; 실패 스킬: $currentName"
+      }
+    }
+  }
+  finally {
+    if ($stageRoot) {
+      try { Remove-SetPath $stageRoot $temporaryRoot }
+      catch { Add-Result '임시 폴더 정리' 'FAIL' "직접 확인 필요: $stageRoot; $($_.Exception.Message)" }
     }
   }
 }
-
 function Resolve-LegacySkill {
-  param([string]$OfficialSkillStatus)
+  param([string]$OfficialSkillStatus, [string]$SkillName = "jesuslife-platform-development", [string]$ResultName = "이전 경로 스킬")
+  $skillDestination = Join-Path $skillParent $SkillName
+  $legacySkillDestination = Join-Path $env:USERPROFILE ".codex\skills\$SkillName"
 
   if (-not (Test-Path -LiteralPath $legacySkillDestination -PathType Container)) {
     return
   }
 
   if (-not $MoveLegacySkill) {
-    Add-Result -Name "이전 경로 스킬" -Status "REVIEW" -Message "중복 인식 가능성 있음: $legacySkillDestination; 확인 후 -MoveLegacySkill 사용"
+    Add-Result -Name $ResultName -Status "REVIEW" -Message "중복 인식 가능성 있음: $legacySkillDestination; 확인 후 -MoveLegacySkill 사용"
     return
   }
 
   $readyStatuses = @("INSTALLED", "UPDATED", "UNCHANGED")
   if ($readyStatuses -notcontains $OfficialSkillStatus) {
-    Add-Result -Name "이전 경로 스킬" -Status "BLOCKED" -Message "공식 경로 스킬 상태가 '$OfficialSkillStatus'이므로 이동하지 않음. 통합 스킬 결과를 먼저 해결하세요. 이전 스킬 보존: $legacySkillDestination"
+    Add-Result -Name $ResultName -Status "BLOCKED" -Message "공식 경로 스킬 상태가 '$OfficialSkillStatus'이므로 이동하지 않음. 3종 스킬 세트 결과를 먼저 해결하세요. 이전 스킬 보존: $legacySkillDestination"
     return
   }
 
   $officialSkillFile = Join-Path $skillDestination "SKILL.md"
   if (-not (Test-Path -LiteralPath $officialSkillFile -PathType Leaf)) {
-    Add-Result -Name "이전 경로 스킬" -Status "BLOCKED" -Message "공식 경로의 스킬 설치를 먼저 확인하세요. 이전 스킬 보존: $legacySkillDestination"
+    Add-Result -Name $ResultName -Status "BLOCKED" -Message "공식 경로의 스킬 설치를 먼저 확인하세요. 이전 스킬 보존: $legacySkillDestination"
     return
   }
 
@@ -235,7 +259,7 @@ function Resolve-LegacySkill {
     $legacyBackupRoot = Join-Path $backupRoot "legacy-skills"
     New-Item -ItemType Directory -Force -Path $legacyBackupRoot | Out-Null
     $operationId = "{0}-{1}" -f $timestamp, ([guid]::NewGuid().ToString("N"))
-    $legacyBackup = Join-Path $legacyBackupRoot "jesuslife-platform-development-$operationId"
+    $legacyBackup = Join-Path $legacyBackupRoot "$SkillName-$operationId"
     $legacyFingerprint = Get-DirectoryFingerprint -Path $legacySkillDestination
     Copy-Item -LiteralPath $legacySkillDestination -Destination $legacyBackup -Recurse
     if ($legacyFingerprint -ne (Get-DirectoryFingerprint -Path $legacyBackup)) {
@@ -247,10 +271,10 @@ function Resolve-LegacySkill {
     catch {
       throw "검증된 백업은 생성했지만 이전 경로를 완전히 제거하지 못했습니다. 원본과 백업을 모두 확인하세요. 원본: $legacySkillDestination; 백업: $legacyBackup; 제거 오류: $($_.Exception.Message)"
     }
-    Add-Result -Name "이전 경로 스킬" -Status "MOVED" -Message "검증된 백업: $legacyBackup"
+    Add-Result -Name $ResultName -Status "MOVED" -Message "검증된 백업: $legacyBackup"
   }
   catch {
-    Add-Result -Name "이전 경로 스킬" -Status "FAIL" -Message $_.Exception.Message
+    Add-Result -Name $ResultName -Status "FAIL" -Message $_.Exception.Message
   }
 }
 
@@ -379,11 +403,17 @@ function Install-AgentFile {
   }
 }
 
-Install-PlatformSkill
-$officialSkillResult = $results | Where-Object { $_.Name -eq "통합 스킬" } | Select-Object -Last 1
-$officialSkillStatus = if ($officialSkillResult) { $officialSkillResult.Status } else { "UNKNOWN" }
-Resolve-LegacySkill -OfficialSkillStatus $officialSkillStatus
-
+$platformSkills=@(
+  @{ Id='jesuslife-platform-development' },
+  @{ Id='jesuslife-platform-design' },
+  @{ Id='jesuslife-platform-implementation' }
+)
+Install-PlatformSkillSet
+foreach ($skill in $platformSkills) {
+  $officialSkillResult=$results | Where-Object { $_.Name -eq $skill.Id } | Select-Object -Last 1
+  $officialSkillStatus=if ($officialSkillResult) { $officialSkillResult.Status } else { 'BLOCKED' }
+  Resolve-LegacySkill -OfficialSkillStatus $officialSkillStatus -SkillName $skill.Id -ResultName "$($skill.Id) 이전 경로 스킬"
+}
 $targets = @(
   @{ Name = "너랑나랑"; Path = $NeorangNarangPath; Template = "neorang-narang.AGENTS.md" },
   @{ Name = "생명일기"; Path = $LifeDiaryPath; Template = "life-diary.AGENTS.md" },
@@ -422,7 +452,7 @@ if ($hasReview) {
   Write-Host "설치 작업이 끝났지만 검토가 필요한 항목이 남아 있습니다."
 }
 else {
-  Write-Host "설치가 끝났습니다. Codex에서 /skills를 실행하여 통합 스킬을 확인하세요."
+  Write-Host "설치가 끝났습니다. Codex에서 /skills를 실행하여 3종 스킬 세트를 확인하세요."
 }
 }
 finally {

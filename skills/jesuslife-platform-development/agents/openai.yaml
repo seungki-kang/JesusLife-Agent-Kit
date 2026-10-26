@@ -1,5 +1,7 @@
 interface:
-  display_name: "JesusLife Platform Development"
-  short_description: "JesusLife 전체 제품을 안전하게 설계·개발·검증"
-  default_prompt: "Use $jesuslife-platform-development to handle this JesusLife platform task with the correct product boundary, data protection, and verification workflow."
+  display_name: "JesusLife 공통 라우터"
+  short_description: "JesusLife 공통 보호 규칙과 설계·개발 자동 라우팅"
+  default_prompt: "Use $jesuslife-platform-development to announce the skills and order, route this task to design or implementation, ask before changing anything unclear or risky, and require approval for important boundaries."
 
+policy:
+  allow_implicit_invocation: true
